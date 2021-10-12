@@ -30,10 +30,12 @@ from utils.plots import Annotator, colors
 from utils.torch_utils import load_classifier, select_device, time_sync
 
 from speechAudio.BEN_Speech import SpeechAudio
+from handDetection.BEN_detectFinger import handLandmarks 
 import time 
 torch.cuda.memory_summary(device=None, abbreviated=False)
 torch.cuda.empty_cache()
 
+hand = handLandmarks()
 @torch.no_grad()
 def run(weights='yolov5s.pt',  # model.pt path(s)
         source='data/images',  # file/dir/URL/glob, 0 for webcam
@@ -75,7 +77,8 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
     countTrue = 0 
     previousText =''
     previousMyText =''
-
+    useHand = False
+    useSpeech = True
 
 
     # Initialize
@@ -197,6 +200,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
         # Process predictions
         #init 3 value to check run speech 
         text =''
+        textHand='' 
 
         for i, det in enumerate(pred):  # per image
             seen += 1
@@ -212,6 +216,23 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, pil=not ascii)
+            
+            # here is add the hand detections
+            if useHand:
+
+                imgHand = annotator.result()
+                hand.showFinger(imgHand) 
+                pointList, box , point8= hand.storePoint(imgHand) 
+            
+            #if len(box) !=0: 
+                #cv2.rectangle( imgHand , ( box[0] - 20 , box[1] - 20  ) , ( box[2] + 20 , box[3]+ 20  ) , (0,255,0),2 )
+                #print (f"that is box hand  {box}")
+
+
+
+
+
+            
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -232,45 +253,103 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        annotator.box_label(xyxy, label, color=colors(c, True))
-                        if save_crop:
-                            save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                        if useHand:
+                            if len(box) > 0 and len(xyxy)>0:
+                                #if box[0]-100<=xyxy[0].item() and box[2]+100>=xyxy[0].item() and box[1]-100<=xyxy[3].item() and box[3]+100>=xyxy[3].item(): 
+                                boxCenter = (0,(box[0]+box[2])/2,(box[1]+box[3])/2)
+                                xyxyCenter = (0,(xyxy[0].item()+xyxy[2].item())/2, (xyxy[1].item()+xyxy[3].item())/2)
+                                distance = hand.distance(boxCenter,xyxyCenter)
+                                print (distance)
+                                if distance <= 130:
+                                    if names[c] == "person":
+                                        pass
+                                    else:
+                                        textHand += names[c] + ','
+                                        annotator.box_label(xyxy, label, color=colors(c, True))
+                                        if save_crop:
+                                            save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                        else:
+                            annotator.box_label(xyxy, label, color=colors(c, True))
+                            if save_crop:
+                                save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
-            # Print time (inference-only)
-            print (text)
-            if previousText == text: 
-                countTrue +=1
-                print (countTrue)
-            else:
-                countTrue = 0 
-            previousText = text 
+            #mode ussing hand
+            if useHand:
+                if previousText == textHand: 
+                    countTrue +=1
+                    #print (countTrue)
+                else:
+                    countTrue = 0   
+                previousText = textHand
+
+                if (time.time() - timeBegin) >= 0.5 and countTrue == 3: 
+                #if countTrue == 5: 
+                    timeBegin = time.time() 
+                    if text.count(",") <= 1:
+                        v = 'is' 
+                    else :
+                        v = 'are'
+                    myText = f"Near your hand {v} {textHand}"
+                    if previousMyText != myText and len(textHand)>2 and useSpeech:
+                        SpeechAudio(myText,language='en').speech()
+                        #print(f'{s}Done. ({t3 - t2:.3f}s)')
+                    previousMyText = myText 
             
-            if (time.time() - timeBegin) >= 5 and countTrue == 10: 
-            #if countTrue == 5: 
-                timeBegin = time.time()
-                if text.count(",") <= 1:
-                    v = 'is' 
-                else :
-                    v = 'are'
-                myText = f"In front of you {v} {text}"
-                if previousMyText != myText:
+            #mode no ussing hand 
+            else: 
 
-                    SpeechAudio(myText,language='en').speech()
-            #print(f'{s}Done. ({t3 - t2:.3f}s)')
-                previousMyText = myText 
+                # Print time (inference-only)
+                #print (text)
+                if previousText == text: 
+                    countTrue +=1
+                    #print (countTrue)
+                else:
+                    countTrue = 0 
+                previousText = text 
+                
+                if (time.time() - timeBegin) >= 5 and countTrue == 10: 
+                #if countTrue == 5: 
+                    timeBegin = time.time()
+                    if text.count(",") <= 1:
+                        v = 'is' 
+                    else :
+                        v = 'are'
+                    myText = f"In front of you {v} {text}"
+                    if previousMyText != myText and useSpeech:
+
+                        SpeechAudio(myText,language='en').speech()
+                #print(f'{s}Done. ({t3 - t2:.3f}s)')
+                    previousMyText = myText 
 
             # Stream results
             im0 = annotator.result()
             if view_img:
+                if useHand: 
+                    cv2.putText( im0 , "Hand: Enable" , (10,30) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
+                else: 
+                    cv2.putText( im0 , "Hand: Disable" , (10,30) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
+
+                if useSpeech: 
+                    cv2.putText( im0 , "Sound: Enable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
+                else:
+                    cv2.putText( im0 , "Sound: Disable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
+
                 cv2.imshow(str(p), im0)
-                if cv2.waitKey(1) == ord("q"):
+                key = cv2.waitKey(1)
+
+                if key == ord("q"):
                     cv2.destroyAllWindows()# 1 millisecond
                     os._exit(0)
+                elif key == ord("h"):
+                    useHand = not useHand
+                elif key == ord("s"):
+                    useSpeech = not useSpeech
 
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
+                    pass
+                    #cv2.imwrite(save_path, im0)
                 else:  # 'video' or 'stream'
                     if vid_path[i] != save_path:  # new video
                         vid_path[i] = save_path
