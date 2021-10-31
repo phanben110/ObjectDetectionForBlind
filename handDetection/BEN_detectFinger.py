@@ -49,7 +49,7 @@ class handLandmarks:
         return self.pointStore  , box , point8
 
     # function to show finger in screen
-    def showFinger( self, img , draw=True ) :
+    def showFinger( self, img , draw=False ) :
         imgRGB = cv2.cvtColor( img , cv2.COLOR_BGR2RGB)
         self.results = self.hands.process(imgRGB)
         #print( results.multi_hand_landmarks)
@@ -96,13 +96,13 @@ class handLandmarks:
                     else :
                         self.statusFinger[i] = 2
 
-            print ( f"status of finger  {self.statusFinger} " )
+            #print ( f"status of finger  {self.statusFinger} " )
             total = sum(self.statusFinger)
 
 
             return self.statusFinger
         else :
-            return 0
+            return [0]
         #if ( len( pointStore ) != 0 ):
             #print ( pointStore )
 
@@ -118,9 +118,9 @@ if __name__ =="__main__" :
     while True :
         success, img = cap.read()
         ben.showFinger( img )
-        pointList, box  = ben.storePoint ( img )
-        ben.findFingerUp(pointList)
-        #print ( box  )
+        pointList, box , my = ben.storePoint ( img )
+        my = ben.findFingerUp(pointList)
+        print (my)
         #print ( pointList[0] )
         print ( len ( box ) )
         if len ( box ) != 0 :

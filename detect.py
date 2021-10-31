@@ -35,6 +35,11 @@ import time
 torch.cuda.memory_summary(device=None, abbreviated=False)
 torch.cuda.empty_cache()
 
+#setup identify color 
+from color_recognition.src.color_recognition_api import color_histogram_feature_extraction
+from color_recognition.src.color_recognition_api import knn_classifier
+
+
 hand = handLandmarks()
 @torch.no_grad()
 def run(weights='yolov5s.pt',  # model.pt path(s)
@@ -79,6 +84,10 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
     previousMyText =''
     useHand = False
     useSpeech = True
+    useColor = False 
+    prediction = None
+    previousText1 =''
+    previousMyText1 =''
 
 
     # Initialize
@@ -218,11 +227,44 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
             annotator = Annotator(im0, line_width=line_thickness, pil=not ascii)
             
             # here is add the hand detections
-            if useHand:
-
+            if useHand or useColor:
                 imgHand = annotator.result()
-                hand.showFinger(imgHand) 
-                pointList, box , point8= hand.storePoint(imgHand) 
+                imgColor = imgHand.copy()
+                if useHand:
+                    hand.showFinger(imgHand,draw=True) 
+                else:
+                    hand.showFinger(imgHand,draw=False) 
+                pointList, box , point8= hand.storePoint(imgHand)
+                if useColor:
+
+                    statusHand = hand.findFingerUp(pointList)
+
+                    if len(statusHand) ==5: 
+
+                        if (statusHand[1]==1 and statusHand[2]==0 and statusHand[3]==0 and statusHand[4]==0): 
+                            useColor = True
+                            #areaBox = abs(box[3]-box[1])
+                            areaBox = hand.distance(pointList[8],pointList[5])
+                            print (pointList[8])
+                            x = areaBox*0.3
+                            print (areaBox)
+                            a=(int(pointList[8][1]-x),int(pointList[8][2]-2*x))
+                            b=(int(pointList[8][1]+x),int(pointList[8][2]))
+                            print ( a,b )                    
+                            prediction = None
+                            try: 
+                                imgColor = imgColor[int(a[1]):int(a[1]+b[1]-a[1]),int(a[0]):int(a[0]+b[0]-a[0])]
+                            #cv2.imshow ("imgColor", imgColor)
+                            # get the prediction
+                                color_histogram_feature_extraction.color_histogram_of_test_image(imgColor)
+                                prediction = knn_classifier.main('training.data', 'test.data')
+                                cv2.putText(imgHand,prediction,(a[0]-10,a[1]-10),cv2.FONT_HERSHEY_PLAIN,2,(0,0,255),2)
+                                print (prediction)
+                                cv2.rectangle( imgHand , a , b , (0,255,0),2 )
+                            except:
+                                pass
+
+
             
             #if len(box) !=0: 
                 #cv2.rectangle( imgHand , ( box[0] - 20 , box[1] - 20  ) , ( box[2] + 20 , box[3]+ 20  ) , (0,255,0),2 )
@@ -259,7 +301,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                                 boxCenter = (0,(box[0]+box[2])/2,(box[1]+box[3])/2)
                                 xyxyCenter = (0,(xyxy[0].item()+xyxy[2].item())/2, (xyxy[1].item()+xyxy[3].item())/2)
                                 distance = hand.distance(boxCenter,xyxyCenter)
-                                print (distance)
+                                #print (distance)
                                 if distance <= 130:
                                     if names[c] == "person":
                                         pass
@@ -268,10 +310,13 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                                         annotator.box_label(xyxy, label, color=colors(c, True))
                                         if save_crop:
                                             save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                        elif useColor: 
+                            pass
                         else:
                             annotator.box_label(xyxy, label, color=colors(c, True))
                             if save_crop:
                                 save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+
 
             #mode ussing hand
             if useHand:
@@ -282,7 +327,7 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                     countTrue = 0   
                 previousText = textHand
 
-                if (time.time() - timeBegin) >= 0.5 and countTrue == 3: 
+                if (time.time() - timeBegin) >= 0.5 and countTrue >= 3: 
                 #if countTrue == 5: 
                     timeBegin = time.time() 
                     if text.count(",") <= 1:
@@ -293,11 +338,19 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                     if previousMyText != myText and len(textHand)>2 and useSpeech:
                         SpeechAudio(myText,language='en').speech()
                         #print(f'{s}Done. ({t3 - t2:.3f}s)')
-                    previousMyText = myText 
-            
+                    previousMyText = myText
+
+            elif useColor: 
+                if (time.time() - timeBegin) >= 1.5: 
+                    timeBegin = time.time() 
+                    myText1 = f"This object is {prediction}"
+                    if previousMyText1 != myText1 and useSpeech:
+                        SpeechAudio(myText1,language='en').speech()
+                        #print(f'{s}Done. ({t3 - t2:.3f}s)')
+                    previousMyText1 = myText1 
+                    #mode no ussing hand 
             #mode no ussing hand 
             else: 
-
                 # Print time (inference-only)
                 #print (text)
                 if previousText == text: 
@@ -321,18 +374,83 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                 #print(f'{s}Done. ({t3 - t2:.3f}s)')
                     previousMyText = myText 
 
+
+            #mode ussing hand
+            #if useHand:
+            #    if useColor:
+            #        if (time.time() - timeBegin) >= 2: 
+            #            timeBegin = time.time() 
+            #            myText1 = f"This object is {prediction}"
+            #            if previousMyText1 != myText1 and useSpeech:
+            #                SpeechAudio(myText1,language='en').speech()
+            #                #print(f'{s}Done. ({t3 - t2:.3f}s)')
+            #            previousMyText1 = myText1 
+            ##mode no ussing hand 
+            #    else:
+            #        if previousText == textHand: 
+            #            countTrue +=1
+            #        #print (countTrue)
+            #        else:
+            #            countTrue = 0   
+            #        previousText = textHand
+            #        if (time.time() - timeBegin) >= 2 and countTrue > 2: 
+            #        #if countTrue == 5: 
+            #            timeBegin = time.time() 
+            #            if text.count(",") <= 1:
+            #                v = 'is' 
+            #            else :
+            #                v = 'are'
+            #            myText = f"Near your hand {v} {textHand}"
+            #            if previousMyText != myText and len(textHand)>2 and useSpeech:
+            #                SpeechAudio(myText,language='en').speech()
+            #                #print(f'{s}Done. ({t3 - t2:.3f}s)')
+            #            previousMyText = myText 
+            #
+            ##mode no ussing hand 
+            #else: 
+
+            #    # Print time (inference-only)
+            #    #print (text)
+            #    if previousText == text: 
+            #        countTrue +=1
+            #        #print (countTrue)
+            #    else:
+            #        countTrue = 0 
+            #    previousText = text 
+            #    
+            #    if (time.time() - timeBegin) >= 5 and countTrue == 10: 
+            #    #if countTrue == 5: 
+            #        timeBegin = time.time()
+            #        if text.count(",") <= 1:
+            #            v = 'is' 
+            #        else :
+            #            v = 'are'
+            #        myText = f"In front of you {v} {text}"
+            #        if previousMyText != myText and useSpeech:
+
+            #            SpeechAudio(myText,language='en').speech()
+            #    #print(f'{s}Done. ({t3 - t2:.3f}s)')
+            #        previousMyText = myText 
+
             # Stream results
             im0 = annotator.result()
             if view_img:
-                if useHand: 
+                if useHand : 
                     cv2.putText( im0 , "Hand: Enable" , (10,30) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
                 else: 
                     cv2.putText( im0 , "Hand: Disable" , (10,30) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
 
                 if useSpeech: 
-                    cv2.putText( im0 , "Sound: Enable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
+                    cv2.putText( im0 , "Sound: Enable" , (10,70) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
                 else:
-                    cv2.putText( im0 , "Sound: Disable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
+                    cv2.putText( im0 , "Sound: Disable" , (10,70) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
+                
+                if useColor:
+                    cv2.putText( im0 , "Color: Enable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (255, 0, 0 ) ,2 )
+                else: 
+                    cv2.putText( im0 , "Color: Disable" , (10,50) , cv2.FONT_HERSHEY_PLAIN,1.8, (0, 0, 255 ) ,2 )
+ 
+
 
                 cv2.imshow(str(p), im0)
                 key = cv2.waitKey(1)
@@ -342,8 +460,14 @@ def run(weights='yolov5s.pt',  # model.pt path(s)
                     os._exit(0)
                 elif key == ord("h"):
                     useHand = not useHand
+                    if useHand: 
+                        useColor = False
                 elif key == ord("s"):
                     useSpeech = not useSpeech
+                elif key == ord("c"):
+                    useColor = not useColor
+                    if useColor: 
+                        useHand = False
 
             # Save results (image with detections)
             if save_img:
